@@ -1,0 +1,151 @@
+import cv2
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Dense, Conv2D, MaxPooling2D, Flatten, LSTM, Concatenate
+import time
+import random
+
+!apt-get install -y portaudio19-dev
+!pip install PyAudio
+
+import pyaudio
+
+
+# ----------------------------------------------------------
+#   MODULE 1: SENSOR ACQUISITION
+# ----------------------------------------------------------
+
+def read_cctv_frame():
+    """Reads a frame from webcam (CCTV simulation)."""
+    cap = cv2.VideoCapture(0)
+    ret, frame = cap.read()
+    cap.release()
+    if ret:
+        frame = cv2.resize(frame, (64, 64))
+        return frame
+    else:
+        return np.zeros((64, 64, 3))
+
+
+def read_thermal_sensor():
+    """Simulates thermal sensor (0–255 heat map)."""
+    thermal_frame = np.random.randint(0, 255, (32, 32), dtype=np.uint8)
+    return thermal_frame
+
+
+def read_acoustic_sensor():
+    """Simulates microphone amplitude for intrusion detection."""
+    # Since Colab environment typically doesn't have a default audio input device,
+    # we will simulate the acoustic sensor data.
+    amplitude = np.random.randint(0, 30000) # Simulate a plausible amplitude range
+    return amplitude
+
+
+# ----------------------------------------------------------
+#   MODULE 2: DATA PREPROCESSING
+# ----------------------------------------------------------
+
+def preprocess_cctv(frame):
+    frame = frame / 255.0
+    return frame.reshape(64, 64, 3)
+
+
+def preprocess_thermal(frame):
+    frame = frame / 255.0
+    return frame.reshape(32, 32, 1)
+
+
+def preprocess_acoustic(value):
+    return np.array([value / 50000.0])  # Normalized amplitude
+
+
+# ----------------------------------------------------------
+#   MODULE 3: MULTIMODAL FUSION MODEL
+# ----------------------------------------------------------
+
+def build_fusion_model():
+    # CCTV branch (CNN)
+    cctv_input = Input(shape=(64, 64, 3))
+    x1 = Conv2D(16, (3,3), activation='relu')(cctv_input)
+    x1 = MaxPooling2D((2,2))(x1)
+    x1 = Flatten()(x1)
+
+    # Thermal branch (CNN)
+    thermal_input = Input(shape=(32, 32, 1))
+    x2 = Conv2D(8, (3,3), activation='relu')(thermal_input)
+    x2 = MaxPooling2D((2,2))(x2)
+    x2 = Flatten()(x2)
+
+    # Acoustic branch (LSTM)
+    acoustic_input = Input(shape=(1,))
+    x3 = Dense(8, activation='relu')(acoustic_input)
+
+    # Fusion layer
+    merged = Concatenate()([x1, x2, x3])
+    fused = Dense(32, activation='relu')(merged)
+    output = Dense(2, activation='softmax')(fused)
+
+    model = Model([cctv_input, thermal_input, acoustic_input], output)
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+
+    return model
+
+
+# ----------------------------------------------------------
+#   MODULE 4: ALERT SYSTEM
+# ----------------------------------------------------------
+
+def send_alert(level):
+    """Simulates alert sending."""
+    if level == "high":
+        print("🚨 CRITICAL ALERT: Intrusion detected! Sending message to security...")
+    elif level == "medium":
+        print("⚠ WARNING: Suspicious activity detected.")
+    else:
+        print("System normal.")
+
+
+# ----------------------------------------------------------
+#   MODULE 5: REAL-TIME SYSTEM LOOP
+# ----------------------------------------------------------
+
+def run_system(model):
+    print("✅ System started... Monitoring in real-time.\n")
+
+    while True:
+        # Sensor inputs
+        cctv = preprocess_cctv(read_cctv_frame())
+        thermal = preprocess_thermal(read_thermal_sensor())
+        acoustic = preprocess_acoustic(read_acoustic_sensor())
+
+        # Reshaping to match model
+        cctv = np.expand_dims(cctv, axis=0)
+        thermal = np.expand_dims(thermal, axis=0)
+        acoustic = np.expand_dims(acoustic, axis=0)
+
+        # Prediction
+        prediction = model.predict([cctv, thermal, acoustic])
+        intrusion_prob = prediction[0][1]
+
+        print(f"Intrusion Probability: {intrusion_prob:.2f}")
+
+        # Alert logic
+        if intrusion_prob > 0.85:
+            send_alert("high")
+        elif intrusion_prob > 0.50:
+            send_alert("medium")
+        else:
+            send_alert("low")
+
+        time.sleep(2)
+
+
+# ----------------------------------------------------------
+#   MAIN EXECUTION
+# ----------------------------------------------------------
+
+if __name__ == "__main__":
+    model = build_fusion_model()
+    print("Model successfully loaded.")
+    run_system(model)
